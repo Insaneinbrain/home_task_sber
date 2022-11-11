@@ -1,0 +1,64 @@
+---
+- hosts: all
+  become: yes
+  vars:
+    job_dir: /home/vagrant/Job
+    job_py_script: ../files/job.py
+    job_sh_script: ../files/job.sh
+
+  tasks:
+  - name: Add repository
+    yum:
+      state: latest
+      name: https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
+
+  - name: Install Packeges
+    yum:
+      name:
+      - git
+      - python34
+      - zip
+      - unzip
+      - htop
+      - telnet
+      state: latest
+      update_cache: yes
+
+  - name: set timezone to Europe/Moscow
+    timezone:
+      name: Europe/Moscow
+
+  - name: Add to /etc/hosts
+    lineinfile:
+      path: /etc/hosts
+      regexp: '.*{{ item.name }}.*$'
+      line: '{{ item.ip }} {{ item.name }}'
+    with_items:
+      - { ip: "192.168.56.120", name: "machine120.test" }
+      - { ip: "192.168.56.100", name: "machine100.test" }
+
+  - name: Creates the job directory
+    file:
+     path: "{{ job_dir }}"
+     state: directory
+     owner: root
+     group: root
+     mode: 0775
+     recurse: yes
+
+  - name: Copy the script files
+    copy:
+      src: "{{ item.name }}"
+      dest: "{{ job_dir }}"
+      owner: vagrant
+      group: vagrant
+      mode: "{{ item.mode }}"
+    with_items:
+      - {name: "{{ job_py_script }}", mode: "0640" }
+      - {name: "{{ job_sh_script }}", mode: "0750" }
+
+  - name: Add a Job
+    cron:
+      user: vagrant
+      job: "{{ job_dir }}/job.sh 2>>{{ job_dir }}/job.err 1>>{{ job_dir }}/job.log"
+      name: "auto job"

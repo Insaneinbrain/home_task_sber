@@ -1,0 +1,156 @@
+---
+- hosts: all
+  become: yes
+  vars:
+    apt_key_sig: 58118E89F3A912897C070ADBF76221572C52609D
+    apt_key_url: hkp://keyserver.ubuntu.com:80
+    apt_repository: deb https://download.docker.com/linux/ubuntu xenial stable
+    docker_pkg_name: docker-ce
+    docker_dir: /home/vagrant/Dummy
+    service_bin_file: ../files/dummy
+    dockerfile_name: ../files/Dockerfile
+
+  tasks:
+
+    #http://wiki.nareyko.by/ansible._could_not_find_aptitude._please_ensure_it_is_installed
+  - name: "FIX: Ubuntu 16.04 LTS doesn't come with certain modules, required by ansible"
+    raw: apt-get install python-minimal aptitude -y
+    become: true
+    become_user: root
+    become_method: sudo
+
+  - name: Run the equivalent of "apt-get update" as a separate step
+    apt:
+      update_cache: yes
+
+  - name: Install Packeges
+    apt:
+      name:
+      - git
+      - zip
+      - unzip
+      - python3-docker
+      - python3-pip
+      - gnupg
+      state: latest
+
+  - name: Add to /etc/hosts
+    lineinfile:
+      path: /etc/hosts
+      regexp: '.*{{ item.name }}.*$'
+      line: '{{ item.ip }} {{ item.name }}  {{ item.fullname }}'
+    with_items:
+      - { ip: "192.168.56.120", name: "machine120" ,fullname: "machine120.test" }
+      - { ip: "192.168.56.100", name: "machine100", fullname: "machine100.test" }
+
+
+#sudo apt-key adv --keyserver hkp://p80.pool.sks-keyservers.net:80 --recv-keys 58118E89F3A912897C070ADBF76221572C52609D
+ # - name: Add Docker repository key
+ #   apt_key:
+ #     id: "{{ apt_key_sig }}"
+ #     keyserver: "{{ apt_key_url }}"
+ #     state: present
+
+#sudo apt-add-repository 'deb https://apt.dockerproject.org/repo ubuntu-xenial main'
+ # - name: Add Docker repository and update apt cache
+ #   apt_repository:
+ #     repo: "{{ apt_repository }}"
+ #     mode: '644'
+ #     update_cache: yes
+ #     state: present
+
+ # - name: Install a docker package
+ #   apt:
+ #     name: "{{ docker_pkg_name }}"
+ #     state: latest
+ #     update_cache: yes
+  
+  - name: Add the GPG key for the official Docker repository
+    shell: curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add -
+    
+  - name: Add the Docker repository to APT sources
+    shell: add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+    
+  - name: Update the package database with the Docker packages from the newly added repo
+    shell: sudo apt-get update
+    
+  - name: Install Docker
+    shell: apt-get install -y docker-ce
+
+  - name: Creates the docker directory
+    file:
+     path: "{{ docker_dir }}"
+     state: directory
+     owner: vagrant
+     group: vagrant
+     mode: 0775
+     recurse: yes
+
+  - name: Copy the service bin file
+    copy:
+      src: "{{ service_bin_file }}"
+      dest: "{{ docker_dir }}"
+      owner: vagrant
+      group: vagrant
+      mode: 0750
+
+  - name: Copy Dockerfile
+    copy:
+      src: "{{ dockerfile_name }}"
+      dest: "{{ docker_dir }}"
+      owner: vagrant
+      group: vagrant
+      mode: 0640
+
+  - name: build the docker image
+    docker_image:
+      name: test
+      tag: dummy
+      state: present
+      source: build
+      build:
+        path: "{{ docker_dir }}"
+        pull: no
+
+  - name: Docker is running
+    docker_container:
+      name: dummy
+      state: started
+      image: test:dummy
+      ports:
+        - 8080:8100
+      log_driver: journald
+      restart: yes
+
+  - name: Install firewalld
+    apt:
+      name: firewalld
+      state: latest
+
+  - name: "FirewallD: add service http"
+    firewalld:
+      service: http
+      permanent: true
+      state: enabled
+
+  - name: "FirewallD: add ports"
+    firewalld:
+      port: "{{ item }}"
+      permanent: true
+      state: enabled
+    with_items:
+    - 8080/tcp
+    - 8180/tcp
+    - 8100/tcp
+
+  - name: "FirewallD: add rule"
+    firewalld:
+      rich_rule: 'rule family=ipv4 source address=192.168.56.100 forward-port port=8080 protocol=tcp to-port=80 to-addr=192.168.56.120'
+      permanent: true
+      state: enabled
+
+
+  - name: "FirewallD: reStart"
+    systemd:
+      name: firewalld
+      state: restarted

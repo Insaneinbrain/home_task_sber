@@ -1,0 +1,43 @@
+# encoding: utf-8
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+
+def set_hostname(server)
+  server.vm.provision 'shell', inline: "hostname #{server.vm.hostname}"
+end
+
+
+Vagrant.configure("2") do |config|
+#https://github.com/mitchellh/vagrant/tree/master/keys
+#https://stackoverflow.com/questions/30075461/how-do-i-add-my-own-public-key-to-vagrant-vm
+  config.ssh.insert_key = false
+  config.vm.provision "file", source: "vagrant.private.key.pem", destination: "~/.ssh/id_rsa"
+  config.vm.define 'machine120' do |cs|
+    cs.vm.box = 'bento/ubuntu-16.04'
+    cs.vm.hostname = 'machine120.test'
+    cs.vm.network 'private_network', ip: '192.168.56.120'
+    set_hostname(cs)
+    cs.vm.provision "ansible_local" do |ansible|
+       ansible.playbook = "playbooks/120.yml"
+       ansible.raw_arguments = ["-e 'ansible_python_interpreter=/usr/bin/python3'"]
+    end
+
+    cs.vm.provider 'virtualbox' do |v|
+      v.memory = 4096
+      v.cpus = 2
+    end
+  end
+
+  config.vm.define 'machine100' do |m|
+    m.vm.box = 'bento/oracle-7.5'
+    m.vm.hostname = 'machine100.test'
+    m.vm.network 'private_network', ip: '192.168.56.100'
+    set_hostname(m)
+    m.vm.provision "ansible_local" do |ansible|
+       ansible.playbook = "playbooks/100.yml"
+
+    end
+  end
+
+end
